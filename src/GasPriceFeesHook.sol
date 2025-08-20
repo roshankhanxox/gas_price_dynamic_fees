@@ -25,7 +25,9 @@ contract GasPriceFeesHook is BaseHook {
 
     error MustUseDynamicFee();
 
-    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
+    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {
+        updateMovingAverage();
+    }
 
     //override funciton to let the PoolManager know which things are enabled for this hook
     function getHookPermissions()
@@ -58,6 +60,9 @@ contract GasPriceFeesHook is BaseHook {
         PoolKey calldata key,
         uint160
     ) internal pure override returns (bytes4) {
+        //isDynamicFee function we get from using the lpFeeLibrary for uint24
+        if (!key.fee.isDynamicFee()) revert MustUseDynamicFee();
+
         return this.beforeInitialize.selector;
     }
 
@@ -68,7 +73,14 @@ contract GasPriceFeesHook is BaseHook {
         bytes calldata
     ) internal view override returns (bytes4, BeforeSwapDelta, uint24) {
         // TODO
-        return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
+        uint24 fee = getFee();
+
+        uint24 feeWithFlag = fee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
+        return (
+            this.beforeSwap.selector,
+            BeforeSwapDeltaLibrary.ZERO_DELTA,
+            feeWithFlag
+        );
     }
 
     function _afterSwap(
@@ -78,7 +90,35 @@ contract GasPriceFeesHook is BaseHook {
         BalanceDelta,
         bytes calldata
     ) internal override returns (bytes4, int128) {
-        // TODO
+        updateMovingAverage();
         return (this.afterSwap.selector, 0);
+    }
+
+    //function to update our moving average gas price
+    //our hook contract will only update the moving average gas price
+    //when the transactions are being made to it so ideally to have most efficient tracking
+    //we should enable every single hook funciton and update the moving average gas price
+    function updateMovingAverage() internal {
+        uint128 gasPrice = uint128(tx.gasprice);
+
+        movingAverageGasPrice =
+            ((movingAverageGasPrice * movingAverageGasPriceCount) + gasPrice) /
+            (movingAverageGasPriceCount + 1);
+
+        movingAverageGasPriceCount++;
+    }
+
+    //helper funciton to get fee
+    function getFee() internal view returns (uint24) {
+        uint128 gasPrice = uint128(tx.gasprice);
+
+        if (gasPrice > (movingAverageGasPrice * 11) / 10) {
+            return BASE_FEE / 2;
+        }
+        if (gasPrice < (movingAverageGasPrice * 9) / 10) {
+            return BASE_FEE / 2;
+        }
+
+        return BASE_FEE;
     }
 }
