@@ -116,7 +116,7 @@ contract GasPriceFeesHook is BaseHook {
             return BASE_FEE / 2;
         }
         if (gasPrice < (movingAverageGasPrice * 9) / 10) {
-            return BASE_FEE / 2;
+            return BASE_FEE * 2;
         }
 
         return BASE_FEE;
